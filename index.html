@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -569,226 +569,79 @@ td .actions { display: flex; gap: 4px; flex-wrap: wrap; }
 
 <div class="alert-overlay" id="alertOverlay"><div class="alert-box"><p id="alertMsg"></p><button onclick="closeAlert()">确定</button></div></div>
 
+
 <script>
-// =====================================================================
-//  纯前端版 — 使用 IndexedDB 替代后端 API
-// =====================================================================
-const DB_NAME = 'PhoneShopDB';
-const DB_VER = 2;
+
+const API_BASE = localStorage.getItem('apiBase') || '';
 let currentBrand = 'all';
 let editingId = null;
 let currentUser = null;
 
-// ============================== 工具 ==============================
-function sha256(str) {
-  const buf = new TextEncoder().encode(str);
-  return crypto.subtle.digest('SHA-256', buf).then(h => {
-    return Array.from(new Uint8Array(h)).map(b => b.toString(16).padStart(2,'0')).join('');
-  });
-}
 function getToken() { return localStorage.getItem('token'); }
 function setToken(t) { if (t) localStorage.setItem('token',t); else localStorage.removeItem('token'); }
 
 const BRAND_SERIES = {
   Apple:'iPhone',Samsung:'Galaxy',Xiaomi:'Xiaomi',Huawei:'Huawei',
-  OPPO:'OPPO',vivo:'vivo',魅族:'魅族',荣耀:'荣耀',OnePlus:'OnePlus',Google:'Pixel',其他:'其他'
+  OPPO:'OPPO',vivo:'vivo',
+  '魅族':'魅族',
+  '荣耀':'荣耀',
+  OnePlus:'OnePlus',Google:'Pixel',
+  '其他':'其他'
 };
 const BRAND_COLORS = {
   Apple:'#b00',Samsung:'#0a6fc9',Xiaomi:'#d47700',Huawei:'#2e7d32',
-  OPPO:'#c2185b',vivo:'#00695c',魅族:'#00838f',荣耀:'#7b1fa2',
-  OnePlus:'#eb0029',Google:'#4285f4',其他:'#616161'
+  OPPO:'#c2185b',vivo:'#00695c',
+  '魅族':'#00838f',
+  '荣耀':'#7b1fa2',
+  OnePlus:'#eb0029',Google:'#4285f4',
+  '其他':'#616161'
 };
 
-// ============================== IndexedDB ==============================
-function openDB() {
-  return new Promise((resolve,reject) => {
-    const r = indexedDB.open(DB_NAME,DB_VER);
-    r.onupgradeneeded = e => {
-      const db = e.target.result;
-      if (!db.objectStoreNames.contains('phones')) {
-        const s = db.createObjectStore('phones',{keyPath:'id',autoIncrement:true});
-        s.createIndex('brand','brand',{unique:false});
-      }
-      if (!db.objectStoreNames.contains('users')) {
-        const s = db.createObjectStore('users',{keyPath:'id',autoIncrement:true});
-        s.createIndex('username','username',{unique:true});
-      }
-    };
-    r.onsuccess = e => resolve(e.target.result);
-    r.onerror = e => reject(e.target.error);
-  });
-}
-function dbAll(store, filter) {
-  return openDB().then(db => new Promise((resolve,reject) => {
-    const tx = db.transaction(store,'readonly');
-    const r = tx.objectStore(store).getAll();
-    r.onsuccess = () => resolve(filter ? r.result.filter(filter) : r.result);
-    r.onerror = e => reject(e.target.error);
-  }));
-}
-function dbGet(store, id) {
-  return openDB().then(db => new Promise((resolve,reject) => {
-    const tx = db.transaction(store,'readonly');
-    const r = tx.objectStore(store).get(id);
-    r.onsuccess = () => resolve(r.result);
-    r.onerror = e => reject(e.target.error);
-  }));
-}
-function dbGetByIndex(store, idx, val) {
-  return openDB().then(db => new Promise((resolve,reject) => {
-    const tx = db.transaction(store,'readonly');
-    const r = tx.objectStore(store).index(idx).getAll(val);
-    r.onsuccess = () => resolve(r.result);
-    r.onerror = e => reject(e.target.error);
-  }));
-}
-function dbAdd(store, obj) {
-  return openDB().then(db => new Promise((resolve,reject) => {
-    const tx = db.transaction(store,'readwrite');
-    const r = tx.objectStore(store).add(obj);
-    r.onsuccess = () => resolve(r.result);
-    r.onerror = e => reject(e.target.error);
-  }));
-}
-function dbPut(store, obj) {
-  return openDB().then(db => new Promise((resolve,reject) => {
-    const tx = db.transaction(store,'readwrite');
-    const r = tx.objectStore(store).put(obj);
-    r.onsuccess = () => resolve(r.result);
-    r.onerror = e => reject(e.target.error);
-  }));
-}
-function dbDel(store, id) {
-  return openDB().then(db => new Promise((resolve,reject) => {
-    const tx = db.transaction(store,'readwrite');
-    const r = tx.objectStore(store).delete(id);
-    r.onsuccess = () => resolve();
-    r.onerror = e => reject(e.target.error);
-  }));
-}
-function dbCount(store) {
-  return openDB().then(db => new Promise((resolve,reject) => {
-    const tx = db.transaction(store,'readonly');
-    const r = tx.objectStore(store).count();
-    r.onsuccess = () => resolve(r.result);
-    r.onerror = e => reject(e.target.error);
-  }));
+async function api(method, path, body) {
+  const opts = { method, headers: { 'Content-Type': 'application/json' } };
+  const token = getToken();
+  if (token) opts.headers['Authorization'] = 'Bearer ' + token;
+  if (body) opts.body = JSON.stringify(body);
+  const res = await fetch(API_BASE + path, opts);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || '请求失败');
+  return data;
 }
 
-// ============================== 种子数据 ==============================
-const SEED_PHONES = [
-  ['魅族','魅族 22 Pro',5999,10,'','魅族','旗舰','{"processor":"Snapdragon 8 Elite","ram":"16GB","storage":"256GB/1TB","screen":"6.79in 2K 144Hz OLED","battery":"5500mAh","charge":"100W","camera":"50MP+50MP+50MP","front":"32MP","os":"Flyme 12","weight":"199g","feature":"AI Key·Ultrasonic FP·IP69"}'],
-  ['魅族','魅族 22',4699,15,'','魅族','旗舰','{"processor":"Snapdragon 8 Elite","ram":"12GB","storage":"256GB/512GB","screen":"6.55in 1.5K 144Hz OLED","battery":"5200mAh","charge":"100W","camera":"50MP+13MP+20MP","front":"32MP","os":"Flyme 12","weight":"189g","feature":"White Panel·No Holes·IP68"}'],
-  ['魅族','魅族 21 Pro',3299,8,'','魅族','次旗舰','{"processor":"Snapdragon 8 Gen 3","ram":"12GB","storage":"256GB","screen":"6.79in 2K+ 120Hz AMOLED","battery":"5050mAh","charge":"80W","camera":"50MP+13MP+10MP","front":"32MP","os":"Flyme 11","weight":"198g","feature":"Ultrasonic FP·IP68·mEngine"}'],
-  ['魅族','魅族 21 Note',2199,20,'','魅族','中端','{"processor":"Snapdragon 8 Gen 2","ram":"12GB","storage":"256GB","screen":"6.7in 1.5K 144Hz OLED","battery":"5500mAh","charge":"80W","camera":"50MP+8MP","front":"16MP","os":"Flyme 11","weight":"195g","feature":"Big Battery·Narrow Bezel"}'],
-  ['Apple','iPhone 17 Pro Max',11999,8,'','iPhone','旗舰','{"processor":"A19 Pro","ram":"12GB","storage":"256GB/1TB","screen":"6.9in OLED 120Hz ProMotion","battery":"4900mAh","charge":"35W","camera":"48MP+48MP+12MP+12MP","front":"12MP","os":"iOS 19","weight":"225g","feature":"Titanium·AI·WiFi 8·USB-C 4.0"}'],
-  ['Apple','iPhone 17 Pro',9999,12,'','iPhone','旗舰','{"processor":"A19 Pro","ram":"12GB","storage":"256GB/1TB","screen":"6.3in OLED 120Hz ProMotion","battery":"3800mAh","charge":"35W","camera":"48MP+48MP+12MP","front":"12MP","os":"iOS 19","weight":"199g","feature":"Titanium·AI·USB-C 4.0"}'],
-  ['Apple','iPhone 17',6999,18,'','iPhone','旗舰','{"processor":"A19","ram":"8GB","storage":"128GB/512GB","screen":"6.1in OLED 120Hz","battery":"3600mAh","charge":"25W","camera":"48MP+12MP","front":"12MP","os":"iOS 19","weight":"170g","feature":"AI·Aluminum·IP68"}'],
-  ['Apple','iPhone 16 Pro',6999,14,'','iPhone','次旗舰','{"processor":"A18 Pro","ram":"8GB","storage":"128GB/512GB","screen":"6.3in OLED 120Hz ProMotion","battery":"3582mAh","charge":"27W","camera":"48MP+48MP+12MP","front":"12MP","os":"iOS 18","weight":"189g","feature":"Titanium·Camera Button·AI·USB-C"}'],
-  ['Apple','iPhone SE 4',3999,25,'','iPhone','中端','{"processor":"A18","ram":"8GB","storage":"128GB/256GB","screen":"6.1in OLED 60Hz","battery":"3300mAh","charge":"20W","camera":"48MP","front":"12MP","os":"iOS 18","weight":"165g","feature":"Face ID·USB-C·AI Features"}'],
-  ['Samsung','Galaxy S26 Ultra',10999,6,'','Galaxy','旗舰','{"processor":"Snapdragon 8 Elite","ram":"16GB","storage":"256GB/1TB","screen":"6.9in Dynamic AMOLED 3X 144Hz","battery":"5500mAh","charge":"65W","camera":"200MP+12MP+10MP+50MP","front":"12MP","os":"One UI 8","weight":"228g","feature":"S Pen·Galaxy AI·Satellite·Titanium"}'],
-  ['Samsung','Galaxy S26+',7999,10,'','Galaxy','旗舰','{"processor":"Snapdragon 8 Elite","ram":"12GB","storage":"256GB/512GB","screen":"6.7in Dynamic AMOLED 3X QHD+ 144Hz","battery":"5000mAh","charge":"65W","camera":"50MP+12MP+10MP","front":"12MP","os":"One UI 8","weight":"194g","feature":"Galaxy AI·UWB·IP69"}'],
-  ['Samsung','Galaxy S26',5999,15,'','Galaxy','旗舰','{"processor":"Exynos 2600/8 Elite","ram":"12GB","storage":"128GB/256GB","screen":"6.2in FHD+ Dynamic AMOLED 3X 144Hz","battery":"4500mAh","charge":"45W","camera":"50MP+12MP+10MP","front":"12MP","os":"One UI 8","weight":"167g","feature":"Galaxy AI·Compact·7Yr Update"}'],
-  ['Samsung','Galaxy Z Fold 7',16999,3,'','Galaxy','旗舰','{"processor":"Snapdragon 8 Elite","ram":"16GB","storage":"256GB/1TB","screen":"8.0in 144Hz Inner","battery":"4800mAh","charge":"45W","camera":"200MP+12MP+10MP","front":"10MP","os":"One UI 8","weight":"235g","feature":"Foldable·S Pen·Galaxy AI·Ti Hinge"}'],
-  ['Samsung','Galaxy A56',2999,30,'','Galaxy','中端','{"processor":"Exynos 1580","ram":"8GB","storage":"128GB/256GB","screen":"6.5in Super AMOLED 120Hz","battery":"5000mAh","charge":"45W","camera":"50MP+12MP+5MP","front":"32MP","os":"One UI 8","weight":"198g","feature":"IP67·microSD·Stereo"}'],
-  ['Xiaomi','Xiaomi 16 Ultra',6999,7,'','Xiaomi','旗舰','{"processor":"Snapdragon 8 Elite","ram":"16GB","storage":"256GB/1TB","screen":"6.81in 2K 144Hz LTPO AMOLED","battery":"5800mAh","charge":"120W","camera":"50MP+50MP+50MP+50MP","front":"32MP","os":"HyperOS 3","weight":"228g","feature":"Leica Quad Cam·AI·IP69·Ceramic"}'],
-  ['Xiaomi','Xiaomi 16 Pro',5499,12,'','Xiaomi','旗舰','{"processor":"Snapdragon 8 Elite","ram":"12GB","storage":"256GB/1TB","screen":"6.73in 2K 144Hz LTPO AMOLED","battery":"5400mAh","charge":"120W","camera":"50MP+50MP+50MP","front":"32MP","os":"HyperOS 3","weight":"217g","feature":"Leica Optics·Micro Curved·IP69"}'],
-  ['Xiaomi','Xiaomi 16',4499,18,'','Xiaomi','次旗舰','{"processor":"Snapdragon 8 Elite","ram":"12GB","storage":"256GB/512GB","screen":"6.36in 1.5K 144Hz LTPO AMOLED","battery":"5200mAh","charge":"90W","camera":"50MP+13MP+50MP","front":"32MP","os":"HyperOS 3","weight":"193g","feature":"Compact Flagship·Leica·IP68"}'],
-  ['Xiaomi','Redmi K80 Pro',3299,20,'','Redmi','次旗舰','{"processor":"Snapdragon 8 Gen 3","ram":"12GB","storage":"256GB/1TB","screen":"6.67in 2K 144Hz OLED","battery":"6000mAh","charge":"120W","camera":"50MP+12MP+50MP","front":"16MP","os":"HyperOS 2","weight":"209g","feature":"Light Hunter·Metal Frame·IP68"}'],
-  ['Xiaomi','Redmi Note 14 Pro',1799,35,'','Redmi','中端','{"processor":"Dimensity 7400","ram":"8GB","storage":"128GB/256GB","screen":"6.67in 1.5K 120Hz AMOLED","battery":"5500mAh","charge":"67W","camera":"200MP+8MP+2MP","front":"20MP","os":"HyperOS 2","weight":"185g","feature":"200MP·IP69·Big Battery"}'],
-  ['Huawei','Mate 80 Pro',8999,5,'','Huawei','旗舰','{"processor":"Kirin 9100","ram":"16GB","storage":"256GB/1TB","screen":"6.9in 2K 144Hz LTPO OLED","battery":"5600mAh","charge":"100W","camera":"50MP+40MP+48MP+12MP","front":"13MP","os":"HarmonyOS 6","weight":"225g","feature":"Satellite Call·Kunlun Glass 3·IP69"}'],
-  ['Huawei','Pura 80 Ultra',7999,4,'','Huawei','旗舰','{"processor":"Kirin 9100","ram":"16GB","storage":"256GB/1TB","screen":"6.78in 2K 144Hz LTPO OLED","battery":"5200mAh","charge":"100W","camera":"50MP+40MP+50MP","front":"16MP","os":"HarmonyOS 6","weight":"206g","feature":"XMAGE 2.0·Retractable Lens·Kunlun Glass"}'],
-  ['Huawei','Mate 80',6499,8,'','Huawei','次旗舰','{"processor":"Kirin 9100","ram":"12GB","storage":"256GB/512GB","screen":"6.7in 1.5K 144Hz LTPO OLED","battery":"5200mAh","charge":"100W","camera":"50MP+12MP+12MP","front":"13MP","os":"HarmonyOS 6","weight":"207g","feature":"Satellite Call·Kunlun Glass·IP68"}'],
-  ['Huawei','Nova 14 Pro',3999,15,'','Huawei','中端','{"processor":"Kirin 9010","ram":"8GB","storage":"256GB/512GB","screen":"6.76in 1.5K 144Hz LTPO OLED","battery":"4800mAh","charge":"100W","camera":"50MP+8MP","front":"60MP","os":"HarmonyOS 5","weight":"196g","feature":"Dual Front Cam·Fast Charge·BDS"}'],
-  ['OPPO','Find X9 Ultra',6999,5,'','OPPO','旗舰','{"processor":"Snapdragon 8 Elite","ram":"16GB","storage":"256GB/1TB","screen":"6.82in 2K 144Hz LTPO AMOLED","battery":"5600mAh","charge":"100W","camera":"50MP+50MP+50MP+50MP","front":"32MP","os":"ColorOS 16","weight":"218g","feature":"Dual Periscope·Hasselblad 3.0·IP69"}'],
-  ['OPPO','Find X9 Pro',5999,8,'','OPPO','旗舰','{"processor":"Snapdragon 8 Elite","ram":"12GB","storage":"256GB/512GB","screen":"6.78in 1.5K 144Hz LTPO AMOLED","battery":"5400mAh","charge":"100W","camera":"50MP+50MP+50MP","front":"32MP","os":"ColorOS 16","weight":"205g","feature":"Hasselblad·Micro Curved·IP69"}'],
-  ['OPPO','Reno 14 Pro+',3699,18,'','OPPO','中端','{"processor":"Dimensity 8400","ram":"12GB","storage":"256GB/512GB","screen":"6.7in 1.5K 144Hz AMOLED","battery":"4800mAh","charge":"80W","camera":"50MP+8MP+32MP","front":"32MP","os":"ColorOS 15","weight":"179g","feature":"AI Portrait·Slim·IP68"}'],
-  ['OPPO','K13 Pro',2299,25,'','OPPO','中端','{"processor":"Snapdragon 8 Gen 2","ram":"8GB","storage":"256GB/512GB","screen":"6.7in FHD+ 120Hz AMOLED","battery":"5500mAh","charge":"100W","camera":"50MP+8MP+2MP","front":"16MP","os":"ColorOS 15","weight":"182g","feature":"IMX906·OIS·100W Fast Charge"}'],
-  ['vivo','X300 Pro+',6999,5,'','vivo','旗舰','{"processor":"Snapdragon 8 Elite","ram":"16GB","storage":"256GB/1TB","screen":"6.82in 2K 144Hz LTPO AMOLED","battery":"6000mAh","charge":"120W","camera":"50MP+50MP+50MP+200MP","front":"32MP","os":"OriginOS 6","weight":"222g","feature":"ZEISS APO Quad·V5 Chip·Ultrasonic FP"}'],
-  ['vivo','X300 Pro',5499,8,'','vivo','旗舰','{"processor":"Dimensity 9500","ram":"12GB","storage":"256GB/1TB","screen":"6.78in 1.5K 144Hz LTPO AMOLED","battery":"5800mAh","charge":"120W","camera":"50MP+50MP+50MP","front":"32MP","os":"OriginOS 6","weight":"214g","feature":"ZEISS·V5 Chip·Blue Ocean Battery"}'],
-  ['vivo','X Fold 5 Pro',9999,3,'','vivo','旗舰','{"processor":"Snapdragon 8 Elite","ram":"16GB","storage":"512GB/1TB","screen":"8.2in 2K 144Hz Inner","battery":"6000mAh","charge":"100W","camera":"50MP+50MP+64MP","front":"32MP","os":"OriginOS 6","weight":"228g","feature":"Foldable·ZEISS·CFRP Hinge"}'],
-  ['vivo','Y300 Pro',1799,40,'','vivo','中端','{"processor":"Snapdragon 7 Gen 3","ram":"8GB","storage":"128GB/256GB","screen":"6.77in FHD+ 120Hz AMOLED","battery":"6500mAh","charge":"80W","camera":"50MP+2MP","front":"16MP","os":"OriginOS 5","weight":"195g","feature":"6500mAh·Slim·AI Assistant"}'],
-  ['荣耀','Magic 8 Pro',6499,4,'','荣耀','旗舰','{"processor":"Snapdragon 8 Elite","ram":"16GB","storage":"256GB/1TB","screen":"6.85in 2K 144Hz LTPO OLED","battery":"5800mAh","charge":"100W","camera":"50MP+50MP+200MP","front":"50MP","os":"MagicOS 10","weight":"225g","feature":"Eagle Eye·Qinghai Lake Battery·Satellite"}'],
-  ['荣耀','Magic 8',5299,8,'','荣耀','次旗舰','{"processor":"Snapdragon 8 Elite","ram":"12GB","storage":"256GB/512GB","screen":"6.78in 1.5K 144Hz LTPO OLED","battery":"5600mAh","charge":"100W","camera":"50MP+50MP+50MP","front":"50MP","os":"MagicOS 10","weight":"215g","feature":"Eagle Eye·Qinghai Lake Battery·Satellite"}'],
-  ['荣耀','荣耀 400 Pro',3499,18,'','荣耀','中端','{"processor":"Snapdragon 8 Gen 3","ram":"12GB","storage":"256GB/512GB","screen":"6.7in 1.5K 144Hz OLED","battery":"5200mAh","charge":"100W","camera":"50MP+12MP+32MP","front":"50MP","os":"MagicOS 9","weight":"189g","feature":"Portrait Camera·Eye Comfort·AI"}'],
-  ['荣耀','X70 GT',2499,22,'','荣耀','次旗舰','{"processor":"Snapdragon 8 Gen 3","ram":"12GB","storage":"256GB/512GB","screen":"6.78in 1.5K 144Hz AMOLED","battery":"5800mAh","charge":"100W","camera":"108MP+2MP","front":"16MP","os":"MagicOS 9","weight":"192g","feature":"Big Battery·GPU Turbo X·Performance"}'],
-  ['OnePlus','OnePlus 14',5299,8,'','OnePlus','旗舰','{"processor":"Snapdragon 8 Elite","ram":"12GB","storage":"256GB/1TB","screen":"6.82in 2K 144Hz LTPO AMOLED","battery":"6000mAh","charge":"100W","camera":"50MP+48MP+64MP","front":"32MP","os":"ColorOS 16","weight":"213g","feature":"Hasselblad 3.0·Ultrasonic FP·IP69"}'],
-  ['OnePlus','OnePlus Ace 6 Pro',3299,18,'','OnePlus','次旗舰','{"processor":"Snapdragon 8 Gen 3","ram":"12GB","storage":"256GB/1TB","screen":"6.78in 1.5K 144Hz LTPO AMOLED","battery":"6300mAh","charge":"100W","camera":"50MP+8MP+2MP","front":"16MP","os":"ColorOS 15","weight":"205g","feature":"Glacier Battery·Ceramic·Tempered Glass"}'],
-  ['OnePlus','OnePlus Ace 6',2799,22,'','OnePlus','次旗舰','{"processor":"Snapdragon 8 Gen 3","ram":"12GB","storage":"256GB/512GB","screen":"6.74in 1.5K 144Hz AMOLED","battery":"5800mAh","charge":"100W","camera":"50MP+8MP+2MP","front":"16MP","os":"ColorOS 15","weight":"198g","feature":"Frame Engine·Gaming Chip·Big Battery"}'],
-  ['OnePlus','OnePlus Nord 5',3299,28,'','OnePlus','中端','{"processor":"Dimensity 9400","ram":"8GB","storage":"128GB/256GB","screen":"6.74in 1.5K 144Hz AMOLED","battery":"5500mAh","charge":"80W","camera":"50MP+8MP+2MP","front":"16MP","os":"OxygenOS 15","weight":"192g","feature":"Dimensity 9400·80W·AI NR"}'],
-  ['Google','Pixel 11 Pro',8999,4,'','Pixel','旗舰','{"processor":"Tensor G6","ram":"16GB","storage":"128GB/512GB","screen":"6.3in OLED 144Hz LTPO","battery":"4900mAh","charge":"30W","camera":"50MP+48MP+48MP+48MP","front":"42MP","os":"Android 17","weight":"197g","feature":"AI Core·7Yr Update·Ti Frame·IP69"}'],
-  ['Google','Pixel 11',6999,10,'','Pixel','次旗舰','{"processor":"Tensor G6","ram":"12GB","storage":"128GB/256GB","screen":"6.3in OLED 144Hz","battery":"4800mAh","charge":"30W","camera":"50MP+48MP","front":"10.5MP","os":"Android 17","weight":"196g","feature":"AI Camera·7Yr Update·IP68·Gemini"}'],
-  ['Google','Pixel 10a',3499,20,'','Pixel','中端','{"processor":"Tensor G5","ram":"8GB","storage":"128GB/256GB","screen":"6.2in OLED 120Hz","battery":"5100mAh","charge":"23W","camera":"64MP+13MP","front":"13MP","os":"Android 16","weight":"189g","feature":"AI·7Yr Update·Compact·Gemini Nano"}'],
-  ['Google','Pixel 10 Pro',6499,8,'','Pixel','次旗舰','{"processor":"Tensor G5","ram":"16GB","storage":"128GB/512GB","screen":"6.3in OLED 120Hz LTPO","battery":"4700mAh","charge":"27W","camera":"50MP+48MP+48MP","front":"42MP","os":"Android 16","weight":"197g","feature":"AI·7Yr Update·Ti Frame·IP68·Gemini"}'],
-];
-
-async function ensureSeeded() {
-  const cnt = await dbCount('phones');
-  if (cnt === 0) {
-    for (const p of SEED_PHONES) {
-      await dbAdd('phones', {
-        brand: p[0], model: p[1], price: p[2], stock: p[3],
-        image: p[4], series: p[5], performance: p[6], specs: p[7]
-      });
-    }
-  }
-  const ucnt = await dbCount('users');
-  if (ucnt === 0) {
-    const pw = await sha256('123456');
-    await dbAdd('users', { username: '123456', password: pw });
-  }
-}
-
-// ============================== 认证 ==============================
 function showLogin() {
   document.getElementById('loginPage').style.display = '';
   document.getElementById('registerPage').style.display = 'none';
-  document.getElementById('loginError').style.display = 'none';
 }
 function showRegister() {
   document.getElementById('loginPage').style.display = 'none';
   document.getElementById('registerPage').style.display = '';
-  document.getElementById('registerError').style.display = 'none';
 }
 
 async function login() {
   const username = document.getElementById('loginUsername').value.trim();
   const password = document.getElementById('loginPassword').value.trim();
-  const errEl = document.getElementById('loginError');
   if (!username || !password) { showAlert('请输入用户名和密码'); return; }
   try {
-    const users = await dbAll('users');
-    const user = users.find(u => u.username === username);
-    if (!user) { showAlert('用户名或密码错误'); return; }
-    const hpw = await sha256(password);
-    if (user.password !== hpw) { showAlert('用户名或密码错误'); return; }
-    const token = Math.random().toString(36).slice(2) + Date.now().toString(36);
-    user.token = token;
-    await dbPut('users', user);
-    setToken(token);
-    currentUser = { id: user.id, username: user.username };
+    const data = await api('POST', '/api/auth/login', { username, password });
+    setToken(data.token);
+    currentUser = data.user;
     enterApp();
-  } catch (e) { errEl.textContent = '登录失败:' + e.message; errEl.style.display = ''; }
+  } catch (e) { showAlert(e.message); }
 }
 
 async function register() {
   const username = document.getElementById('regUsername').value.trim();
   const password = document.getElementById('regPassword').value.trim();
-  const errEl = document.getElementById('registerError');
   if (!username || !password) { showAlert('请填写用户名和密码'); return; }
   if (username.length < 3) { showAlert('用户名至少3位字符'); return; }
   if (password.length < 3) { showAlert('密码至少3位字符'); return; }
   try {
-    const users = await dbAll('users');
-    if (users.find(u => u.username === username)) { showAlert('用户名已存在'); return; }
-    const hpw = await sha256(password);
-    const token = Math.random().toString(36).slice(2) + Date.now().toString(36);
-    const newId = await dbAdd('users', { username, password: hpw, token });
-    setToken(token);
-    currentUser = { id: newId, username };
+    const data = await api('POST', '/api/auth/register', { username, password });
+    setToken(data.token);
+    currentUser = data.user;
     showAlert('注册成功！欢迎 ' + username);
     enterApp();
-  } catch (e) { errEl.textContent = '注册失败:' + e.message; errEl.style.display = ''; }
+  } catch (e) { showAlert(e.message); }
 }
 
 function logout() {
@@ -796,7 +649,6 @@ function logout() {
   currentUser = null;
   document.querySelectorAll('.auth-page, #mainApp, .header-user').forEach(el => el.style.display = 'none');
   document.getElementById('loginPage').style.display = '';
-  document.getElementById('loginError').style.display = 'none';
   document.getElementById('loginUsername').value = '';
   document.getElementById('loginPassword').value = '';
 }
@@ -814,57 +666,42 @@ function closeModalById(id) {
   document.getElementById(id).classList.remove('show');
 }
 
-// ============================== 用户管理 ==============================
 async function addUser() {
   const username = document.getElementById('newUserName').value.trim();
   const password = document.getElementById('newUserPw').value.trim();
   const msgEl = document.getElementById('addUserMsg');
   if (!username || !password) { msgEl.textContent = '请填写用户名和密码'; msgEl.style.display = ''; return; }
   try {
-    const users = await dbAll('users');
-    if (users.find(u => u.username === username)) { msgEl.textContent = '用户名已存在'; msgEl.style.display = ''; return; }
-    const hpw = await sha256(password);
-    await dbAdd('users', { username, password: hpw });
+    await api('POST', '/api/users', { username, password });
     document.getElementById('newUserName').value = '';
     document.getElementById('newUserPw').value = '';
     msgEl.style.display = 'none';
-    showToast(`已添加用户 ${username}`, 'success');
+    showToast('已添加用户 ' + username, 'success');
     showUsers();
-  } catch (e) { msgEl.textContent = '添加失败'; msgEl.style.display = ''; }
+  } catch (e) { msgEl.textContent = e.message; msgEl.style.display = ''; }
 }
 
 async function showUsers() {
   try {
-    const users = await dbAll('users');
+    const users = await api('GET', '/api/users');
     const list = document.getElementById('usersList');
-    list.innerHTML = users.map(u => `
-      <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #f0f0f0">
-        <span style="font-weight:${u.id === currentUser?.id ? '700' : '400'};color:${u.id === currentUser?.id ? '#0f3460' : '#333'}">${u.username} ${u.id === currentUser?.id ? '(当前)' : ''}</span>
-        ${u.id !== currentUser?.id ? `<button class="btn btn-edit" style="padding:4px 14px;font-size:13px" onclick="switchToUser(${u.id})">切换</button>` : ''}
-      </div>
-    `).join('');
+    list.innerHTML = users.map(function(u) {
+      var isCur = u.id === currentUser?.id;
+      return '<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #f0f0f0">' +
+        '<span style="font-weight:' + (isCur ? '700' : '400') + ';color:' + (isCur ? '#0f3460' : '#333') + '">' + u.username + (isCur ? ' (当前)' : '') + '</span>' +
+        (isCur ? '' : '<button class="btn btn-edit" style="padding:4px 14px;font-size:13px" onclick="switchToUser(' + u.id + ')">切换</button>') +
+      '</div>';
+    }).join('');
     document.getElementById('usersOverlay').classList.add('show');
   } catch (e) { showToast('获取用户列表失败', 'error'); }
 }
 
 async function switchToUser(userId) {
-  try {
-    const user = await dbGet('users', userId);
-    if (!user) { showToast('用户不存在', 'error'); return; }
-    const token = Math.random().toString(36).slice(2) + Date.now().toString(36);
-    user.token = token;
-    await dbPut('users', user);
-    setToken(token);
-    currentUser = { id: user.id, username: user.username };
-    document.getElementById('currentUserLabel').textContent = currentUser.username;
-    document.getElementById('usersOverlay').classList.remove('show');
-    showToast(`已切换到 ${currentUser.username}`, 'success');
-    loadPhones();
-  } catch (e) { showToast('切换失败', 'error'); }
+  showAlert('请使用该用户账号重新登录');
+  logout();
 }
 
 function showPasswordModal() {
-  document.getElementById('pwError').style.display = 'none';
   document.getElementById('pwOld').value = '';
   document.getElementById('pwNew').value = '';
   document.getElementById('passwordOverlay').classList.add('show');
@@ -873,290 +710,214 @@ function showPasswordModal() {
 async function changePassword() {
   const oldPassword = document.getElementById('pwOld').value.trim();
   const newPassword = document.getElementById('pwNew').value.trim();
-  const errEl = document.getElementById('pwError');
   if (!oldPassword || !newPassword) { showAlert('请填写完整'); return; }
   try {
-    const user = await dbGet('users', currentUser.id);
-    const hpwOld = await sha256(oldPassword);
-    if (user.password !== hpwOld) { showAlert('原密码错误'); return; }
-    const hpwNew = await sha256(newPassword);
-    user.password = hpwNew;
-    await dbPut('users', user);
+    await api('PUT', '/api/auth/password', { oldPassword, newPassword });
     document.getElementById('passwordOverlay').classList.remove('show');
     showToast('密码已修改，请重新登录', 'info');
     logout();
-  } catch (e) { errEl.textContent = '修改失败'; errEl.style.display = ''; }
+  } catch (e) { showAlert(e.message); }
 }
 
-// ============================== 品牌 ==============================
 async function loadBrands() {
-  const phones = await dbAll('phones');
-  const brandSet = [...new Set(phones.map(p => p.brand))];
-  const brands = brandSet.sort((a,b) => {
-    if (a === '魅族') return -1; if (b === '魅族') return 1;
-    return a.localeCompare(b, 'zh');
-  });
-  const nav = document.getElementById('brandNav');
-  nav.innerHTML = '<button class="brand-tab active" data-brand="all" onclick="switchBrand(\'all\')">全部</button>';
-  brands.forEach(b => {
-    const btn = document.createElement('button');
-    btn.className = 'brand-tab';
-    btn.dataset.brand = b;
-    btn.textContent = b;
-    btn.onclick = () => switchBrand(b);
-    nav.appendChild(btn);
-  });
+  try {
+    const phones = await api('GET', '/api/phones');
+    var brandSet = {};
+    phones.forEach(function(p) { brandSet[p.brand] = true; });
+    var brands = Object.keys(brandSet).sort(function(a,b) {
+      if (a === '魅族') return -1; if (b === '魅族') return 1;
+      return a.localeCompare(b, 'zh');
+    });
+    var nav = document.getElementById('brandNav');
+    nav.innerHTML = '<button class="brand-tab active" data-brand="all" onclick="switchBrand(\'all\')">全部</button>';
+    brands.forEach(function(b) {
+      var btn = document.createElement('button');
+      btn.className = 'brand-tab';
+      btn.dataset.brand = b;
+      btn.textContent = b;
+      btn.onclick = function() { switchBrand(b); };
+      nav.appendChild(btn);
+    });
+  } catch (e) { showToast('加载品牌失败', 'error'); }
 }
 
 function switchBrand(brand) {
   currentBrand = brand;
-  document.querySelectorAll('#brandNav .brand-tab').forEach(el => {
+  document.querySelectorAll('#brandNav .brand-tab').forEach(function(el) {
     el.classList.toggle('active', el.dataset.brand === brand);
   });
   loadPhones();
 }
 
-// ============================== 手机列表 ==============================
 async function loadPhones() {
-  const search = document.getElementById('searchInput').value.trim().toLowerCase();
-  const minPrice = parseFloat(document.getElementById('minPrice').value) || 0;
-  const maxPrice = parseFloat(document.getElementById('maxPrice').value) || Infinity;
-
-  let phones = await dbAll('phones');
-  if (currentBrand !== 'all') phones = phones.filter(p => p.brand === currentBrand);
-  if (search) phones = phones.filter(p => p.model.toLowerCase().includes(search));
-  if (minPrice > 0) phones = phones.filter(p => p.price >= minPrice);
-  if (maxPrice < Infinity) phones = phones.filter(p => p.price <= maxPrice);
-
-  // 魅族排第一，其他按品牌+型号排序
-  phones.sort((a,b) => {
-    if (a.brand === '魅族' && b.brand !== '魅族') return -1;
-    if (a.brand !== '魅族' && b.brand === '魅族') return 1;
-    if (a.brand !== b.brand) return a.brand.localeCompare(b.brand, 'zh');
-    return a.model.localeCompare(b.model, 'zh');
-  });
-
-  renderTable(phones);
-  loadStats();
+  var search = document.getElementById('searchInput').value.trim().toLowerCase();
+  var minPrice = parseFloat(document.getElementById('minPrice').value) || 0;
+  var maxPrice = parseFloat(document.getElementById('maxPrice').value) || 0;
+  var params = new URLSearchParams();
+  if (currentBrand !== 'all') params.set('brand', currentBrand);
+  if (search) params.set('search', search);
+  if (minPrice > 0) params.set('minPrice', minPrice);
+  if (maxPrice > 0) params.set('maxPrice', maxPrice);
+  try {
+    var phones = await api('GET', '/api/phones?' + params.toString());
+    renderTable(phones);
+    loadStats();
+  } catch (e) { showToast('加载失败', 'error'); }
 }
 
 function renderTable(phones) {
-  const tbody = document.getElementById('tableBody');
-  const grid = document.getElementById('phoneGrid');
+  var tbody = document.getElementById('tableBody');
+  var grid = document.getElementById('phoneGrid');
   if (phones.length === 0) {
     tbody.innerHTML = '<tr><td colspan="9"><div class="empty"><p>暂无数据</p></div></td></tr>';
     grid.innerHTML = '<div class="empty">暂无数据</div>';
     return;
   }
-  const color = p => BRAND_COLORS[p.brand] || '#616161';
-  const initial = p => p.brand.charAt(0);
-  const badgeClass = p => `badge badge-${p.brand.toLowerCase().replace(/\s+/g, '')}`;
-  const perfClass = p => `perf-badge perf-${p.performance}`;
-  const stockClass = p => p.stock === 0 ? 'stock-out' : (p.stock <= 5 ? 'stock-low' : '');
-  const statusText = p => p.stock === 0 ? '缺货' : (p.stock <= 5 ? '紧急补货' : '正常');
-  const statusColor = p => p.stock === 0 ? '#bbb' : (p.stock <= 5 ? '#e53935' : '#43a047');
+  function color(p) { return BRAND_COLORS[p.brand] || '#616161'; }
+  function initial(p) { return p.brand.charAt(0); }
+  function badgeClass(p) { return 'badge badge-' + p.brand.toLowerCase().replace(/\s+/g, ''); }
+  function perfClass(p) { return 'perf-badge perf-' + p.performance; }
+  function stockClass(p) { return p.stock === 0 ? 'stock-out' : (p.stock <= 5 ? 'stock-low' : ''); }
+  function statusText(p) { return p.stock === 0 ? '缺货' : (p.stock <= 5 ? '紧急补货' : '正常'); }
+  function statusColor(p) { return p.stock === 0 ? '#bbb' : (p.stock <= 5 ? '#e53935' : '#43a047'); }
 
-  function imgHtml(p) {
-    const c = color(p), inits = initial(p);
-    if (p.image) {
-      return `<img class="phone-img" src="${p.image}" alt="${p.model}"
-        onerror="this.onerror=null;this.outerHTML='<div class=\\'phone-img-placeholder\\' style=\\'background:${c}\\'>${inits}</div>'">`;
-    }
-    return `<div class="phone-img-placeholder" style="background:${c}">${inits}</div>`;
-  }
-
-  tbody.innerHTML = phones.map(p => {
-    const seriesShow = p.series ? `<span style="color:#555;font-size:12px">${p.series}</span>` : '<span style="color:#ccc">-</span>';
-    return `<tr>
-      <td>${imgHtml(p)}</td>
-      <td><strong>${p.model}</strong></td>
-      <td><span class="${badgeClass(p)}">${p.brand}</span></td>
-      <td>${seriesShow}</td>
-      <td><span class="${perfClass(p)}">${p.performance}</span></td>
-      <td><strong>¥${p.price.toLocaleString()}</strong></td>
-      <td class="${stockClass(p)}">${p.stock}</td>
-      <td><span style="color:${statusColor(p)};font-weight:600">${statusText(p)}</span></td>
-      <td><div class="actions"><button class="btn btn-specs" onclick="showDetail(${p.id})">详情</button></div></td>
-    </tr>`;
+  tbody.innerHTML = phones.map(function(p) {
+    var c = color(p), inits = initial(p);
+    var img = p.image
+      ? '<img class="phone-img" src="' + p.image + '" alt="' + p.model + '" onerror="this.onerror=null;this.outerHTML=\'<div class=\'phone-img-placeholder\' style=\'background:' + c + '\'>' + inits + '</div>\'">'
+      : '<div class="phone-img-placeholder" style="background:' + c + '">' + inits + '</div>';
+    var seriesShow = p.series ? '<span style="color:#555;font-size:12px">' + p.series + '</span>' : '<span style="color:#ccc">-</span>';
+    return '<tr><td>' + img + '</td><td><strong>' + p.model + '</strong></td><td><span class="' + badgeClass(p) + '">' + p.brand + '</span></td><td>' + seriesShow + '</td><td><span class="' + perfClass(p) + '">' + p.performance + '</span></td><td><strong>¥' + p.price.toLocaleString() + '</strong></td><td class="' + stockClass(p) + '">' + p.stock + '</td><td><span style="color:' + statusColor(p) + ';font-weight:600">' + statusText(p) + '</span></td><td><div class="actions"><button class="btn btn-specs" onclick="showDetail(' + p.id + ')">详情</button></div></td></tr>';
   }).join('');
 
-  grid.innerHTML = phones.map(p => {
-    const c = color(p), inits = initial(p);
-    const statusT = statusText(p);
-    const statusC = statusColor(p);
-    const perfC = p.performance === '旗舰' ? '#f57f17' : p.performance === '次旗舰' ? '#283593' : p.performance === '中端' ? '#2e7d32' : '#c62828';
-    let cardImg;
-    if (p.image) {
-      cardImg = `<div class="card-img" style="background:${c};overflow:hidden">
-        <img src="${p.image}" style="width:100%;height:100%;object-fit:cover" alt=""
-          onerror="this.outerHTML='${inits}'"></div>`;
-    } else {
-      cardImg = `<div class="card-img" style="background:${c}">${inits}</div>`;
-    }
-    return `<div class="phone-card" onclick="showDetail(${p.id})">
-      ${cardImg}
-      <div class="card-body">
-        <div class="card-model">${p.model}</div>
-        <div class="card-meta">
-          <span class="${badgeClass(p)}">${p.brand}</span>
-          <span style="color:${perfC};font-weight:600">${p.performance}</span>
-          ${p.series ? `<span style="color:#999">${p.series}</span>` : ''}
-        </div>
-      </div>
-      <div class="card-right">
-        <div class="card-price">¥${p.price.toLocaleString()}</div>
-        <div class="card-stock" style="color:${statusC};font-weight:${p.stock <= 5 ? '700' : '400'}">库存: ${p.stock}</div>
-      </div>
-    </div>`;
+  grid.innerHTML = phones.map(function(p) {
+    var c = color(p), inits = initial(p);
+    var perfC = p.performance === '旗舰' ? '#f57f17' : p.performance === '次旗舰' ? '#283593' : p.performance === '中端' ? '#2e7d32' : '#c62828';
+    var cardImg = p.image
+      ? '<div class="card-img" style="background:' + c + ';overflow:hidden"><img src="' + p.image + '" style="width:100%;height:100%;object-fit:cover" alt="" onerror="this.outerHTML=\'' + inits + '\'"></div>'
+      : '<div class="card-img" style="background:' + c + '">' + inits + '</div>';
+    var statusC = statusColor(p);
+    return '<div class="phone-card" onclick="showDetail(' + p.id + ')">' + cardImg +
+      '<div class="card-body"><div class="card-model">' + p.model + '</div><div class="card-meta"><span class="' + badgeClass(p) + '">' + p.brand + '</span><span style="color:' + perfC + ';font-weight:600">' + p.performance + '</span>' + (p.series ? '<span style="color:#999">' + p.series + '</span>' : '') + '</div></div>' +
+      '<div class="card-right"><div class="card-price">¥' + p.price.toLocaleString() + '</div><div class="card-stock" style="color:' + statusC + ';font-weight:' + (p.stock <= 5 ? '700' : '400') + '">库存: ' + p.stock + '</div></div></div>';
   }).join('');
 }
 
 function autoFillSeries() {
-  const brand = document.getElementById('formBrand').value;
+  var brand = document.getElementById('formBrand').value;
   document.getElementById('formSeries').value = BRAND_SERIES[brand] || brand;
 }
 
-// ============================== 配置弹窗 ==============================
 async function showSpecs(id) {
-  const p = await dbGet('phones', id);
-  if (!p) return;
-  let specs;
-  try { specs = typeof p.specs === 'string' ? JSON.parse(p.specs) : p.specs; } catch (e) { specs = {}; }
-
-  const container = document.getElementById('specsContent');
-  const color = BRAND_COLORS[p.brand] || '#616161';
-  const initial = p.brand.charAt(0);
-
-  const imgHtml = p.image
-    ? `<img src="${p.image}" alt="${p.model}" style="width:80px;height:80px;border-radius:10px;object-fit:cover"
-        onerror="this.onerror=null;this.outerHTML='<div style=\\'width:80px;height:80px;border-radius:10px;display:flex;align-items:center;justify-content:center;background:${color};color:#fff;font-size:28px;font-weight:700\\'>${initial}</div>'">`
-    : `<div style="width:80px;height:80px;border-radius:10px;display:flex;align-items:center;justify-content:center;background:${color};color:#fff;font-size:28px;font-weight:700">${initial}</div>`;
-
-  let specsHtml = Object.entries(specs).map(([k, v]) =>
-    `<div class="specs-item"><span class="specs-key">${k}</span><span class="specs-val">${v}</span></div>`
-  ).join('') || '<div class="empty"><p>暂无配置信息</p></div>';
-
-  container.innerHTML = `
-    <div class="specs-header">${imgHtml}
-      <div class="specs-title"><h3>${p.model}</h3>
-        <span>${p.brand}${p.series ? ' · ' + p.series : ''} · ${p.performance} · ¥${p.price.toLocaleString()}</span>
-      </div>
-    </div>
-    <div class="specs-grid">${specsHtml}</div>`;
-  document.getElementById('specsOverlay').classList.add('show');
+  try {
+    var p = await api('GET', '/api/phones/' + id);
+    if (!p) return;
+    var specs;
+    try { specs = typeof p.specs === 'string' ? JSON.parse(p.specs) : p.specs; } catch (e) { specs = {}; }
+    var color = BRAND_COLORS[p.brand] || '#616161';
+    var init = p.brand.charAt(0);
+    var imgHtml = p.image
+      ? '<img src="' + p.image + '" alt="' + p.model + '" style="width:80px;height:80px;border-radius:10px;object-fit:cover" onerror="this.onerror=null;this.outerHTML=\'<div style=\'width:80px;height:80px;border-radius:10px;display:flex;align-items:center;justify-content:center;background:' + color + ';color:#fff;font-size:28px;font-weight:700\'>' + init + '</div>\'">'
+      : '<div style="width:80px;height:80px;border-radius:10px;display:flex;align-items:center;justify-content:center;background:' + color + ';color:#fff;font-size:28px;font-weight:700">' + init + '</div>';
+    var specsHtml = Object.entries(specs).map(function(e) { return '<div class="specs-item"><span class="specs-key">' + e[0] + '</span><span class="specs-val">' + e[1] + '</span></div>'; }).join('') || '<div class="empty"><p>暂无配置信息</p></div>';
+    document.getElementById('specsContent').innerHTML = '<div class="specs-header">' + imgHtml + '<div class="specs-title"><h3>' + p.model + '</h3><span>' + p.brand + (p.series ? ' · ' + p.series : '') + ' · ' + p.performance + ' · ¥' + p.price.toLocaleString() + '</span></div></div><div class="specs-grid">' + specsHtml + '</div>';
+    document.getElementById('specsOverlay').classList.add('show');
+  } catch (e) { showToast('加载失败', 'error'); }
 }
 
 function closeSpecs() {
   document.getElementById('specsOverlay').classList.remove('show');
 }
 
-// ============================== 详情页面 ==============================
 async function showDetail(id) {
-  const p = await dbGet('phones', id);
-  if (!p) return;
-  renderDetail(p);
-  document.getElementById('detailPage').classList.add('active');
-  document.querySelector('.stats').style.display = 'none';
-  document.querySelector('.layout').style.display = 'none';
+  try {
+    var p = await api('GET', '/api/phones/' + id);
+    if (!p) return;
+    renderDetail(p);
+    document.getElementById('detailPage').classList.add('active');
+    var stats = document.querySelector('.stats');
+    if (stats) stats.style.display = 'none';
+  } catch (e) { showToast('加载失败', 'error'); }
 }
 
 function backToList() {
   document.getElementById('detailPage').classList.remove('active');
   document.getElementById('detailContent').innerHTML = '';
-  document.querySelector('.stats').style.display = '';
-  document.querySelector('.layout').style.display = '';
+  var stats = document.querySelector('.stats');
+  if (stats) stats.style.display = '';
 }
 
 function renderDetail(p) {
-  const color = BRAND_COLORS[p.brand] || '#616161';
-  const initial = p.brand.charAt(0);
-  const perfClass = `perf-badge perf-${p.performance}`;
-  const statusText = p.stock === 0 ? '缺货' : (p.stock <= 5 ? '紧急补货' : '正常');
-  const statusColor = p.stock === 0 ? '#999' : (p.stock <= 5 ? '#e53935' : '#43a047');
-
-  let imgHtml;
-  if (p.image) {
-    imgHtml = `<img src="${p.image}" alt="${p.model}" style="width:180px;height:180px;object-fit:cover;border-radius:12px;flex-shrink:0;border:1px solid #eee;background:#fafafa;box-shadow:0 2px 8px rgba(0,0,0,.08)"
-      onerror="this.onerror=null;this.outerHTML='<div class=\\'placeholder\\' style=\\'background:${color}\\'>${initial}</div>'">`;
-  } else {
-    imgHtml = `<div class="placeholder" style="background:${color}">${initial}</div>`;
-  }
-
-  let specs;
+  var color = BRAND_COLORS[p.brand] || '#616161';
+  var init = p.brand.charAt(0);
+  var perfClass = 'perf-badge perf-' + p.performance;
+  var statusText = p.stock === 0 ? '缺货' : (p.stock <= 5 ? '紧急补货' : '正常');
+  var statusColor = p.stock === 0 ? '#999' : (p.stock <= 5 ? '#e53935' : '#43a047');
+  var imgHtml = p.image
+    ? '<img src="' + p.image + '" alt="' + p.model + '" style="width:180px;height:180px;object-fit:cover;border-radius:12px;flex-shrink:0;border:1px solid #eee;background:#fafafa;box-shadow:0 2px 8px rgba(0,0,0,.08)" onerror="this.onerror=null;this.outerHTML=\'<div class=\'placeholder\' style=\'background:' + color + '\'>' + init + '</div>\'">'
+    : '<div class="placeholder" style="background:' + color + '">' + init + '</div>';
+  var specs;
   try { specs = typeof p.specs === 'string' ? JSON.parse(p.specs) : p.specs; } catch (e) { specs = {}; }
-  const specsHtml = Object.entries(specs).map(([k, v]) =>
-    `<div class="s-item"><span class="s-key">${k}</span><span class="s-val">${v}</span></div>`
-  ).join('') || '<p style="color:#999">暂无配置信息</p>';
+  var specsHtml = Object.entries(specs).map(function(e) { return '<div class="s-item"><span class="s-key">' + e[0] + '</span><span class="s-val">' + e[1] + '</span></div>'; }).join('') || '<p style="color:#999">暂无配置信息</p>';
 
-  document.getElementById('detailContent').innerHTML = `
-    <div class="detail-header">${imgHtml}
-      <div class="detail-info">
-        <h2>${p.model}</h2>
-        <div class="tags">
-          <span class="${perfClass}">${p.performance}</span>
-          <span style="background:#e3f2fd;color:#1565c0">${p.brand}</span>
-          ${p.series ? `<span style="background:#f3e5f5;color:#7b1fa2">${p.series}</span>` : ''}
-          <span style="color:${statusColor};background:${statusColor}15;font-weight:600">${statusText}</span>
-        </div>
-        <div class="detail-meta">
-          <div class="meta-item"><div class="val">¥${p.price.toLocaleString()}</div><div class="lbl">价格</div></div>
-          <div class="meta-item"><div class="val">${p.stock}</div><div class="lbl">库存</div></div>
-          <div class="meta-item"><div class="val">${p.performance}</div><div class="lbl">性能定位</div></div>
-          ${p.series ? `<div class="meta-item"><div class="val" style="font-size:16px">${p.series}</div><div class="lbl">系列</div></div>` : ''}
-        </div>
-        <div class="detail-actions">
-          <button class="btn btn-edit" onclick="openModal('edit',${p.id}); document.getElementById('detailPage').dataset.returnId=${p.id}">改价</button>
-          <button class="btn btn-restock" onclick="openModal('restock',${p.id}); document.getElementById('detailPage').dataset.returnId=${p.id}">补货</button>
-          <button class="btn btn-edit" onclick="openModal('editAll',${p.id}); document.getElementById('detailPage').dataset.returnId=${p.id}">编辑</button>
-          <button class="btn btn-delete" onclick="deletePhoneFromDetail(${p.id})">删除</button>
-        </div>
-      </div>
-    </div>
-    <div class="detail-body">
-      <h3>详细配置</h3>
-      <div class="detail-specs">${specsHtml}</div>
-    </div>`;
+  document.getElementById('detailContent').innerHTML =
+    '<div class="detail-header">' + imgHtml +
+      '<div class="detail-info"><h2>' + p.model + '</h2>' +
+        '<div class="tags">' +
+          '<span class="' + perfClass + '">' + p.performance + '</span>' +
+          '<span style="background:#e3f2fd;color:#1565c0">' + p.brand + '</span>' +
+          (p.series ? '<span style="background:#f3e5f5;color:#7b1fa2">' + p.series + '</span>' : '') +
+          '<span style="color:' + statusColor + ';background:' + statusColor + '15;font-weight:600">' + statusText + '</span>' +
+        '</div>' +
+        '<div class="detail-meta">' +
+          '<div class="meta-item"><div class="val">¥' + p.price.toLocaleString() + '</div><div class="lbl">价格</div></div>' +
+          '<div class="meta-item"><div class="val">' + p.stock + '</div><div class="lbl">库存</div></div>' +
+          '<div class="meta-item"><div class="val">' + p.performance + '</div><div class="lbl">性能定位</div></div>' +
+          (p.series ? '<div class="meta-item"><div class="val" style="font-size:16px">' + p.series + '</div><div class="lbl">系列</div></div>' : '') +
+        '</div>' +
+        '<div class="detail-actions">' +
+          '<button class="btn btn-edit" onclick="openModal(\'edit\',' + p.id + '); document.getElementById(\'detailPage\').dataset.returnId=' + p.id + '">改价</button>' +
+          '<button class="btn btn-restock" onclick="openModal(\'restock\',' + p.id + '); document.getElementById(\'detailPage\').dataset.returnId=' + p.id + '">补货</button>' +
+          '<button class="btn btn-edit" onclick="openModal(\'editAll\',' + p.id + '); document.getElementById(\'detailPage\').dataset.returnId=' + p.id + '">编辑</button>' +
+          '<button class="btn btn-delete" onclick="deletePhoneFromDetail(' + p.id + ')">删除</button>' +
+        '</div></div></div>' +
+    '<div class="detail-body"><h3>详细配置</h3><div class="detail-specs">' + specsHtml + '</div></div>';
 }
 
 async function deletePhoneFromDetail(id) {
   if (!confirm('确定要删除该手机吗？')) return;
   try {
-    await dbDel('phones', id);
+    await api('DELETE', '/api/phones/' + id);
     showToast('已删除', 'info');
     backToList();
     loadPhones();
   } catch (e) { showToast('删除失败: ' + e.message, 'error'); }
 }
 
-// ============================== 统计 ==============================
 async function loadStats() {
-  const phones = await dbAll('phones');
-  const totalPhones = phones.length;
-  const totalStock = phones.reduce((s, p) => s + p.stock, 0);
-  const totalValue = phones.reduce((s, p) => s + p.price * p.stock, 0);
-  const lowStock = phones.filter(p => p.stock > 0 && p.stock <= 5).length;
-  document.getElementById('totalPhones').textContent = totalPhones;
-  document.getElementById('totalStock').textContent = totalStock;
-  document.getElementById('totalValue').textContent = '¥' + totalValue.toLocaleString();
-  document.getElementById('lowStockCount').textContent = lowStock;
+  try {
+    var s = await api('GET', '/api/stats');
+    document.getElementById('totalPhones').textContent = s.totalPhones;
+    document.getElementById('totalStock').textContent = s.totalStock;
+    document.getElementById('totalValue').textContent = '¥' + s.totalValue.toLocaleString();
+    document.getElementById('lowStockCount').textContent = s.lowStock;
+  } catch (e) {}
 }
 
-// ============================== 模态框 ==============================
 function openModal(action, id) {
-  const overlay = document.getElementById('modalOverlay');
-  const title = document.getElementById('modalTitle');
-  const saveBtn = document.getElementById('modalSaveBtn');
-  const elModel = document.getElementById('formModel');
-  const elBrand = document.getElementById('formBrand');
-  const elPrice = document.getElementById('formPrice');
-  const elStock = document.getElementById('formStock');
-  const elImage = document.getElementById('formImage');
-  const elPerf = document.getElementById('formPerformance');
-  const elSeries = document.getElementById('formSeries');
-
-  [elModel, elBrand, elSeries, elPrice, elStock, elImage, elPerf].forEach(e => { e.disabled = false; e.style.display = ''; });
-  document.querySelectorAll('#modalOverlay .form-group, #modalOverlay .form-row').forEach(e => e.style.display = '');
-
+  var overlay = document.getElementById('modalOverlay');
+  var title = document.getElementById('modalTitle');
+  var saveBtn = document.getElementById('modalSaveBtn');
+  var elModel = document.getElementById('formModel');
+  var elBrand = document.getElementById('formBrand');
+  var elPrice = document.getElementById('formPrice');
+  var elStock = document.getElementById('formStock');
+  var elImage = document.getElementById('formImage');
+  var elPerf = document.getElementById('formPerformance');
+  var elSeries = document.getElementById('formSeries');
+  var fields = [elModel, elBrand, elSeries, elPrice, elStock, elImage, elPerf];
+  fields.forEach(function(e) { e.disabled = false; e.style.display = ''; });
+  document.querySelectorAll('#modalOverlay .form-group, #modalOverlay .form-row').forEach(function(e) { e.style.display = ''; });
   if (action === 'add') {
     title.textContent = '添加新手机';
     elModel.value = ''; elBrand.value = 'Apple';
@@ -1165,27 +926,25 @@ function openModal(action, id) {
     editingId = null; saveBtn.textContent = '添加'; saveBtn.dataset.action = 'add';
     overlay.classList.add('show'); return;
   }
-
-  dbGet('phones', id).then(p => {
+  api('GET', '/api/phones/' + id).then(function(p) {
     if (!p) return;
     elModel.value = p.model; elBrand.value = p.brand;
     elSeries.value = p.series || '';
     elPrice.value = p.price; elStock.value = p.stock;
     elImage.value = p.image || ''; elPerf.value = p.performance || '中端';
-
     if (action === 'edit') {
-      title.textContent = `修改价格 - ${p.model}`;
+      title.textContent = '修改价格 - ' + p.model;
       elModel.disabled = true; elBrand.disabled = true; elSeries.disabled = true;
       elImage.disabled = true; elPerf.disabled = true;
       elStock.style.display = 'none'; elStock.disabled = true;
       document.querySelectorAll('#modalOverlay .form-row')[1].style.display = 'none';
       editingId = id; saveBtn.textContent = '保存价格'; saveBtn.dataset.action = 'edit';
     } else if (action === 'editAll') {
-      title.textContent = `编辑 - ${p.model}`;
+      title.textContent = '编辑 - ' + p.model;
       elModel.disabled = true; elBrand.disabled = true; elSeries.disabled = true;
       editingId = id; saveBtn.textContent = '保存修改'; saveBtn.dataset.action = 'editAll';
     } else {
-      title.textContent = `补货 - ${p.model}`;
+      title.textContent = '补货 - ' + p.model;
       elModel.disabled = true; elBrand.disabled = true; elSeries.disabled = true;
       elPrice.disabled = true; elImage.disabled = true; elPerf.disabled = true;
       elStock.value = '';
@@ -1201,47 +960,41 @@ function closeModal() {
 }
 
 async function savePhone() {
-  const action = document.getElementById('modalSaveBtn').dataset.action;
-  const model = document.getElementById('formModel').value.trim();
-  const brand = document.getElementById('formBrand').value;
-  const series = document.getElementById('formSeries').value.trim();
-  const price = parseFloat(document.getElementById('formPrice').value);
-  const stock = parseInt(document.getElementById('formStock').value) || 0;
-  const image = document.getElementById('formImage').value.trim();
-  const performance = document.getElementById('formPerformance').value;
-
+  var action = document.getElementById('modalSaveBtn').dataset.action;
+  var model = document.getElementById('formModel').value.trim();
+  var brand = document.getElementById('formBrand').value;
+  var series = document.getElementById('formSeries').value.trim();
+  var price = parseFloat(document.getElementById('formPrice').value);
+  var stock = parseInt(document.getElementById('formStock').value) || 0;
+  var image = document.getElementById('formImage').value.trim();
+  var performance = document.getElementById('formPerformance').value;
   try {
     if (action === 'add') {
       if (!model) return showToast('请输入手机型号', 'error');
       if (!price || price <= 0) return showToast('请输入有效价格', 'error');
-      await dbAdd('phones', { brand, model, series, price, stock, image, performance, specs: '{}' });
-      showToast(`已添加 ${model}`, 'success');
+      await api('POST', '/api/phones', { brand: brand, model: model, series: series, price: price, stock: stock, image: image, performance: performance, specs: '{}' });
+      showToast('已添加 ' + model, 'success');
     } else if (action === 'edit') {
       if (!price || price <= 0) return showToast('请输入有效价格', 'error');
-      const p = await dbGet('phones', editingId);
-      p.price = price;
-      await dbPut('phones', p);
-      showToast(`价格已更新为 ¥${price}`, 'success');
+      await api('PUT', '/api/phones/' + editingId, { price: price });
+      showToast('价格已更新为 ¥' + price, 'success');
     } else if (action === 'editAll') {
       if (!price || price <= 0) return showToast('请输入有效价格', 'error');
-      const p = await dbGet('phones', editingId);
-      p.price = price; p.stock = stock; p.image = image; p.performance = performance;
-      await dbPut('phones', p);
-      showToast(`已更新 ${model}`, 'success');
+      await api('PUT', '/api/phones/' + editingId, { price: price, stock: stock, image: image, performance: performance });
+      showToast('已更新 ' + model, 'success');
     } else if (action === 'restock') {
       if (stock <= 0) return showToast('请输入有效的补货数量', 'error');
-      const p = await dbGet('phones', editingId);
-      p.stock += stock;
-      await dbPut('phones', p);
-      showToast(`补货成功，当前库存: ${p.stock}`, 'success');
+      var p = await api('GET', '/api/phones/' + editingId);
+      await api('PUT', '/api/phones/' + editingId, { stock: p.stock + stock });
+      showToast('补货成功，当前库存: ' + (p.stock + stock), 'success');
     }
-    const dp = document.getElementById('detailPage');
-    const detailId = dp.classList.contains('active') ? editingId : null;
+    var dp = document.getElementById('detailPage');
+    var detailId = dp.classList.contains('active') ? editingId : null;
     closeModal();
     loadPhones();
     if (detailId) {
-      const p = await dbGet('phones', detailId);
-      if (p) renderDetail(p);
+      var pp = await api('GET', '/api/phones/' + detailId);
+      if (pp) renderDetail(pp);
     }
   } catch (e) { showToast('操作失败: ' + e.message, 'error'); }
 }
@@ -1249,7 +1002,7 @@ async function savePhone() {
 async function deletePhone(id) {
   if (!confirm('确定要删除该手机吗？')) return;
   try {
-    await dbDel('phones', id);
+    await api('DELETE', '/api/phones/' + id);
     showToast('已删除', 'info');
     loadPhones();
   } catch (e) { showToast('删除失败: ' + e.message, 'error'); }
@@ -1263,37 +1016,34 @@ function closeAlert() {
   document.getElementById('alertOverlay').classList.remove('show');
 }
 
-function showToast(msg, type = 'info') {
-  const el = document.createElement('div');
-  el.className = `toast toast-${type}`;
+function showToast(msg, type) {
+  if (!type) type = 'info';
+  var el = document.createElement('div');
+  el.className = 'toast toast-' + type;
   el.textContent = msg;
   document.body.appendChild(el);
-  setTimeout(() => { el.remove(); }, 3000);
+  setTimeout(function() { el.remove(); }, 3000);
 }
 
-// ============================== 初始化 ==============================
 (async function init() {
-  await ensureSeeded();
-  const token = getToken();
-  if (token) {
-    const users = await dbAll('users');
-    const user = users.find(u => u.token === token);
-    if (user) {
-      currentUser = { id: user.id, username: user.username };
+  try {
+    var token = getToken();
+    if (token) {
+      var data = await api('GET', '/api/auth/user');
+      currentUser = data.user;
       enterApp();
       return;
     }
-  }
+  } catch (e) {}
   setToken(null);
-  document.querySelectorAll('.auth-page').forEach(el => el.style.display = 'none');
+  document.querySelectorAll('.auth-page').forEach(function(el) { el.style.display = 'none'; });
   document.getElementById('loginPage').style.display = 'flex';
 })();
 
-// 注册 Service Worker（PWA 离线缓存）
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('sw.js').then(() => {}).catch(() => {});
+  navigator.serviceWorker.register('sw.js').then(function() {}).catch(function() {});
 }
-</script>
 
+</script>
 </body>
 </html>
